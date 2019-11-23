@@ -4,8 +4,15 @@ provider:
   name: aws
   runtime: python3.7
 
+package:
+  exclude:
+    - tests/**
+    - delivery/**
+    - LICENSE
+    - README.md
+
 functions:
   helloWorld:
-    handler: hello_world/hello_world.entry_point
+    handler: services.hello_world.hello_world.entry_point
     name: HelloWorld
     description: A lambda function to help us demonstrate continuous delivery

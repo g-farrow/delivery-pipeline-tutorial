@@ -8,7 +8,7 @@ Parameters:
     Description: Name of the Stack
   RepositoryName:
     Type: String
-    Default: baseline-serverless-pipeline
+    Default: delivery-pipeline-tutorial
     Description: The name of the CodeCommit repository to collect the code from
   RepositoryBranch:
     Type: String

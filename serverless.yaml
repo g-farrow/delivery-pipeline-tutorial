@@ -1,4 +1,4 @@
-service: baseline-serverless-pipeline
+service: delivery-pipeline-tutorial-application
 
 provider:
   name: aws

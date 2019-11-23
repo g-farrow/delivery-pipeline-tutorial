@@ -1,0 +1,350 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Infrastructure as Code deployment pipeline
+
+Parameters:
+  StackName:
+    Type: String
+    Default: delivery-pipeline-tutorial
+    Description: Name of the Stack
+  RepositoryName:
+    Type: String
+    Default: baseline-serverless-pipeline
+    Description: The name of the CodeCommit repository to collect the code from
+  RepositoryBranch:
+    Type: String
+    Default: master
+    Description: The name of the git branch which should be used for deployments
+
+Resources:
+
+  # Bucket for storing build artifacts
+  PipelineBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      Tags:
+      - Key: STACK_NAME
+        Value: !Ref StackName
+
+  # Definition of the Delivery pipeline for CodePipeline
+  Pipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Location: !Ref PipelineBucket
+        Type: S3
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: SourceAction
+          ActionTypeId:
+            Category: Source
+            Owner: AWS
+            Provider: CodeCommit
+            Version: 1
+          OutputArtifacts:
+          - Name: !Sub "${StackName}-source"
+          Configuration:
+            RepositoryName: !Ref RepositoryName
+            BranchName: !Ref RepositoryBranch
+      - Name: Validate
+        Actions:
+        - Name: BuildAction
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: 1
+            Provider: CodeBuild
+          InputArtifacts:
+            - Name: !Sub "${StackName}-source"
+          Configuration:
+            ProjectName: !Ref Validate
+      - Name: Test
+        Actions:
+        - Name: BuildAction
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: 1
+            Provider: CodeBuild
+          InputArtifacts:
+            - Name: !Sub "${StackName}-source"
+          Configuration:
+            ProjectName: !Ref Test
+      - Name: Deploy
+        Actions:
+        - Name: BuildAction
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: 1
+            Provider: CodeBuild
+          InputArtifacts:
+            - Name: !Sub "${StackName}-source"
+          Configuration:
+            ProjectName: !Ref Deploy
+
+  # IAM Role assumed for creating and updating
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "codepipeline.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: s3-upload
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:GetBucketVersioning"
+                  - "s3:PutObject"
+                Resource:
+                  - !GetAtt PipelineBucket.Arn
+                  - !Sub "${PipelineBucket.Arn}/*"
+        - PolicyName: code-build-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "codebuild:BatchGetBuilds"
+                  - "codebuild:StartBuild"
+                Resource: '*'
+        -
+          PolicyName: codecommit-repository-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "codecommit:GetBranch"
+                  - "codecommit:GetCommit"
+                  - "codecommit:UploadArchive"
+                  - "codecommit:GetUploadArchiveStatus"
+                  - "codecommit:CancelUploadArchive"
+                Resource: '*'
+        - PolicyName: cloudformation-stack-management
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Effect: Allow
+              Action:
+                - "cloudformation:CreateStack"
+                - "cloudformation:DescribeStacks"
+                - "cloudformation:UpdateStack"
+                - "cloudformation:DeleteStack"
+                - "iam:PassRole"
+              Resource: '*'
+
+  # AWS CodeBuild Project
+  Validate:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Sub ${AWS::StackName}-Delivery-Validate
+      ServiceRole: !GetAtt ValidateRole.Arn
+      Artifacts:
+        # The downloaded source code for the build will come from CodePipeline
+        Type: CODEPIPELINE
+        Name: !Ref StackName
+      Environment:
+        # Linux container with node installed
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        Image: "aws/codebuild/nodejs:8.11.0"
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - npm install
+                - npm install -g serverless
+            pre_build:
+              commands:
+                - npm install webpack
+                - npm install serverless-webpack
+            build:
+              commands:
+                - serverless deploy --noDeploy --stage validation
+      Tags:
+        - Key: STACK_NAME
+          Value: !Ref StackName
+
+  # IAM Role that allows CodeBuild to interact with required services
+  ValidateRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "codebuild.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /service-role/
+      Policies:
+        - PolicyName: !Sub "${StackName}-Delivery-DeploymentRole"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:GetBucketVersioning"
+                Resource:
+                  - !GetAtt PipelineBucket.Arn
+                  - !Join ['', [!GetAtt PipelineBucket.Arn, "/*"]]
+              - Effect: Allow
+                Action:
+                  - "logs:*"
+                Resource:
+                  - "*"
+
+  # AWS CodeBuild Project
+  Test:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Sub ${AWS::StackName}-Delivery-Test
+      ServiceRole: !GetAtt TestRole.Arn
+      Artifacts:
+        # The downloaded source code for the build will come from CodePipeline
+        Type: CODEPIPELINE
+        Name: !Ref StackName
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        Image: "aws/codebuild/nodejs:8.11.0"
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.2
+          phases:
+            build:
+              commands:
+                - python -m tests.test_hello_world
+      Tags:
+        - Key: STACK_NAME
+          Value: !Ref StackName
+
+  # IAM Role that allows CodeBuild to interact with required services
+  TestRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "codebuild.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /service-role/
+      Policies:
+        - PolicyName: !Sub "${StackName}-Delivery-DeploymentRole"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:GetBucketVersioning"
+                Resource:
+                  - !GetAtt PipelineBucket.Arn
+                  - !Join ['', [!GetAtt PipelineBucket.Arn, "/*"]]
+              - Effect: Allow
+                Action:
+                  - "logs:*"
+                Resource:
+                  - "*"
+
+  # AWS CodeBuild Project
+  Deploy:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Sub ${AWS::StackName}-Delivery-Deploy
+      ServiceRole: !GetAtt DeployRole.Arn
+      Artifacts:
+        # The downloaded source code for the build will come from CodePipeline
+        Type: CODEPIPELINE
+        Name: !Ref StackName
+      Environment:
+        # Linux container with node installed
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        Image: "aws/codebuild/nodejs:8.11.0"
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - npm install
+                - npm install -g serverless
+            pre_build:
+              commands:
+                - npm install webpack
+                - npm install serverless-webpack
+            build:
+              commands:
+                - serverless deploy --region ${AWS::Region} --stage Dev
+      Tags:
+        - Key: STACK_NAME
+          Value: !Ref StackName
+
+  # IAM Role that allows CodeBuild to interact with required services
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "codebuild.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /service-role/
+      Policies:
+        - PolicyName: !Sub "${StackName}-Delivery-DeploymentRole"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:GetBucketVersioning"
+                  - "s3:PutObject"
+                Resource:
+                  - !GetAtt PipelineBucket.Arn
+                  - !Join ['', [!GetAtt PipelineBucket.Arn, "/*"]]
+              - Effect: Allow
+                Action:
+                  - "logs:*"
+#                  - "cloudfront:*"
+#                  - "apigateway:*"
+                  - "cloudformation:*"
+                  - "s3:*"
+                  - "iam:*"
+                  - "lambda:*"
+                Resource:
+                  - "*"

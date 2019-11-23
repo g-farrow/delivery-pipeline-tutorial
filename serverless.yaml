@@ -1,0 +1,11 @@
+service: baseline-serverless-pipeline
+
+provider:
+  name: aws
+  runtime: python3.7
+
+functions:
+  helloWorld:
+    handler: hello_world/hello_world.entry_point
+    name: HelloWorld
+    description: A lambda function to help us demonstrate continuous delivery

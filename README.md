@@ -18,4 +18,6 @@ This directory contains the 'application' codebase.
 
 ## Tests
 This directory contains the necessary unit tests for the 'application'
- 
+
+# Was this helpful?
+I hope this starter kit is useful and helps you to achieve Continuous Delivery. If you've benefited from the help, how about saying thank by [buying me a coffee ;)](https://monzo.me/gregfarrow)  

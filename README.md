@@ -1,6 +1,6 @@
 # delivery-pipeline-tutorial
 
-This repository contains the accompanying code for this [CI/CD Pipeline Tutorial]()
+This repository contains the accompanying code for this [CI/CD Pipeline Tutorial](https://medium.com/responsetap-engineering/continuous-delivery-in-20-minutes-eda26f0cbf1f)
 
 It contains the necessary code to create and run a CI/CD Pipeline in AWS using the fopllowing technologies:
 * [AWS CodePipeline](https://aws.amazon.com/codepipeline/)
